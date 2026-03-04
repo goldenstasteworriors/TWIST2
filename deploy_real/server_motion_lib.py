@@ -42,6 +42,14 @@ ROBOT_SIM_CONFIGS = {
     },
 }
 
+# g1(29DoF) -> jingchu03 upper-body(16DoF) mapping tables.
+# 你只需要调这两行:
+# - JINGCHU03_MOTION_DOF_SIGN: 关节方向符号(+1/-1)
+# - JINGCHU03_MOTION_DOF_ZERO_OFFSET: 关节零位偏置(弧度)
+JINGCHU03_MOTION_DOF_SRC_IDX = [13, 12, 15, 16, 17, 18, -1, 20, 19, 22, 23, 24, 25, -1, 27, 26]
+JINGCHU03_MOTION_DOF_SIGN = [1.0, 1.0, -1.0, 1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, 1.0, -1.0, 1.0, -1.0, 1.0]
+JINGCHU03_MOTION_DOF_ZERO_OFFSET = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
 
 def apply_fixed_base_visual_offset(sim_model: mujoco.MjModel, z_offset: float):
     """Apply world-frame z offset for fixed-base upper-body visualization."""
@@ -74,34 +82,15 @@ def map_motion_dof_to_robot(robot_type: str, dof_pos: torch.Tensor) -> torch.Ten
     if src_dofs != 29:
         raise ValueError(f"jingchu03_upper_body expects source dof=29 or 16, got {src_dofs}")
 
-    # Source is G1-29DoF motion, target is Jingchu03 upper-body 16DoF.
-    # Target order:
-    # [waist_roll, waist_yaw, l_shoulder_pitch, l_shoulder_roll, l_shoulder_yaw,
-    #  l_elbow_pitch, l_elbow_yaw, l_wrist_pitch, l_wrist_roll,
-    #  r_shoulder_pitch, r_shoulder_roll, r_shoulder_yaw,
-    #  r_elbow_pitch, r_elbow_yaw, r_wrist_pitch, r_wrist_roll]
-    zero_ref = dof_pos[..., 0] * 0.0
-    # Pitch-axis polarity differs between source G1 motion and jingchu03 upper-body model.
-    # Negating pitch-related DoFs keeps forward/backward reaching direction consistent.
-    mapped = torch.stack([
-        dof_pos[..., 13],   # waist_roll
-        dof_pos[..., 12],   # waist_yaw
-        -dof_pos[..., 15],  # left_shoulder_pitch
-        dof_pos[..., 16],   # left_shoulder_roll
-        dof_pos[..., 17],   # left_shoulder_yaw
-        -dof_pos[..., 18],  # left_elbow_pitch
-        zero_ref,           # left_elbow_yaw (no corresponding DoF in G1)
-        -dof_pos[..., 20],  # left_wrist_pitch
-        dof_pos[..., 19],   # left_wrist_roll
-        -dof_pos[..., 22],  # right_shoulder_pitch
-        dof_pos[..., 23],   # right_shoulder_roll
-        dof_pos[..., 24],   # right_shoulder_yaw
-        -dof_pos[..., 25],  # right_elbow_pitch
-        zero_ref,           # right_elbow_yaw (no corresponding DoF in G1)
-        -dof_pos[..., 27],  # right_wrist_pitch
-        dof_pos[..., 26],   # right_wrist_roll
-    ], dim=-1)
-    return mapped
+    src_idx = torch.tensor(JINGCHU03_MOTION_DOF_SRC_IDX, device=dof_pos.device, dtype=torch.long)
+    sign = torch.tensor(JINGCHU03_MOTION_DOF_SIGN, device=dof_pos.device, dtype=dof_pos.dtype)
+    zero_offset = torch.tensor(JINGCHU03_MOTION_DOF_ZERO_OFFSET, device=dof_pos.device, dtype=dof_pos.dtype)
+
+    mapped = torch.zeros(*dof_pos.shape[:-1], src_idx.numel(), device=dof_pos.device, dtype=dof_pos.dtype)
+    valid_mask = src_idx >= 0
+    mapped[..., valid_mask] = dof_pos[..., src_idx[valid_mask]]
+
+    return mapped * sign + zero_offset
 
 
 def build_mimic_obs(
