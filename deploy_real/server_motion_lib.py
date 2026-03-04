@@ -26,18 +26,38 @@ ROBOT_SIM_CONFIGS = {
         "xml_file": "../assets/g1/g1_mocap_29dof.xml",
         "robot_base": "pelvis",
         "floating_base": True,
+        "base_height_offset": 0.0,
     },
     "unitree_g1_with_hands": {
         "xml_file": "../assets/g1/g1_mocap_29dof.xml",
         "robot_base": "pelvis",
         "floating_base": True,
+        "base_height_offset": 0.0,
     },
     "jingchu03_upper_body": {
         "xml_file": "../assets/jingchu03/jingchu03_upper_body.xml",
         "robot_base": "waist_yaw",
         "floating_base": False,
+        "base_height_offset": 0.8,
     },
 }
+
+
+def apply_fixed_base_visual_offset(sim_model: mujoco.MjModel, z_offset: float):
+    """Apply world-frame z offset for fixed-base upper-body visualization."""
+    if abs(z_offset) < 1e-9:
+        return
+
+    root_body_id = sim_model.body("waist_roll").id
+    sim_model.body_pos[root_body_id, 2] += z_offset
+
+    # Shift world-attached visual mesh geoms (e.g. Robotbase) together.
+    for geom_id in range(sim_model.ngeom):
+        if (
+            sim_model.geom_bodyid[geom_id] == 0
+            and sim_model.geom_type[geom_id] == mujoco.mjtGeom.mjGEOM_MESH
+        ):
+            sim_model.geom_pos[geom_id, 2] += z_offset
 
 
 def map_motion_dof_to_robot(robot_type: str, dof_pos: torch.Tensor) -> torch.Tensor:
@@ -164,7 +184,7 @@ def build_mimic_obs(
             root_vel.detach().cpu().numpy().squeeze(), root_ang_vel.detach().cpu().numpy().squeeze()
 
 
-def main(args, xml_file, robot_base, floating_base):
+def main(args, xml_file, robot_base, floating_base, base_height_offset):
     # Remote control state  
     motion_started = False if args.use_remote_control else True
     
@@ -176,6 +196,8 @@ def main(args, xml_file, robot_base, floating_base):
     sim_data = None
     if args.vis:
         sim_model = mujoco.MjModel.from_xml_path(xml_file)
+        if not floating_base:
+            apply_fixed_base_visual_offset(sim_model, base_height_offset)
         sim_data = mujoco.MjData(sim_model)
         viewer = launch_passive(model=sim_model, data=sim_data, show_left_ui=False, show_right_ui=False)
             
@@ -383,5 +405,6 @@ if __name__ == "__main__":
     xml_file = f"{HERE}/{robot_cfg['xml_file']}"
     robot_base = robot_cfg["robot_base"]
     floating_base = robot_cfg["floating_base"]
+    base_height_offset = robot_cfg.get("base_height_offset", 0.0)
 
-    main(args, xml_file, robot_base, floating_base)
+    main(args, xml_file, robot_base, floating_base, base_height_offset)

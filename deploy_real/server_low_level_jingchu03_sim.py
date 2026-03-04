@@ -22,16 +22,19 @@ class Jingchu03SimController:
         limit_fps=True,
         control_frequency=100,
         max_steps=None,
+        base_height=0.8,
     ):
         self.robot_name = robot_name
         self.measure_fps = measure_fps
         self.limit_fps = limit_fps
         self.max_steps = max_steps
+        self.base_height = base_height
 
         self.redis_client = redis.Redis(host="localhost", port=6379, db=0)
         self.redis_pipeline = self.redis_client.pipeline()
 
         self.model = mujoco.MjModel.from_xml_path(xml_file)
+        self._apply_base_height_offset(self.base_height)
         self.model.opt.timestep = 0.001
         self.data = mujoco.MjData(self.model)
 
@@ -79,12 +82,31 @@ class Jingchu03SimController:
         print(f"  sim_dt: {self.sim_dt}")
         print(f"  control_frequency: {control_frequency}")
         print(f"  sim_decimation: {self.sim_decimation}")
+        print(f"  base_height_offset: {self.base_height}")
+
+    def _apply_base_height_offset(self, z_offset: float):
+        """Raise fixed-base model in world frame by z_offset meters."""
+        if abs(z_offset) < 1e-9:
+            return
+
+        root_body_id = self.model.body("waist_roll").id
+        self.model.body_pos[root_body_id, 2] += z_offset
+
+        # Shift world-attached visual mesh geoms (e.g. Robotbase).
+        for geom_id in range(self.model.ngeom):
+            if (
+                self.model.geom_bodyid[geom_id] == 0
+                and self.model.geom_type[geom_id] == mujoco.mjtGeom.mjGEOM_MESH
+            ):
+                self.model.geom_pos[geom_id, 2] += z_offset
 
     def reset(self):
         mujoco.mj_resetData(self.model, self.data)
         self.data.qpos[:] = self.default_dof_pos
         self.data.qvel[:] = 0.0
         mujoco.mj_forward(self.model, self.data)
+        waist_yaw_z = float(self.data.xpos[self.model.body("waist_yaw").id][2])
+        print(f"Initial waist_yaw height: {waist_yaw_z:.3f} m")
 
     def _get_action_from_redis(self):
         keys = [
@@ -208,6 +230,7 @@ def main():
     parser.add_argument("--limit_fps", help="Limit sim FPS with sleep", default=1, type=int)
     parser.add_argument("--control_frequency", help="Control frequency", default=100, type=int)
     parser.add_argument("--max_steps", help="Maximum sim steps", default=None, type=int)
+    parser.add_argument("--base_height", help="Fixed-base z offset (m)", default=0.8, type=float)
     args = parser.parse_args()
 
     if not os.path.exists(args.xml):
@@ -221,6 +244,7 @@ def main():
     print(f"  Limit FPS: {args.limit_fps}")
     print(f"  Control frequency: {args.control_frequency}")
     print(f"  Max steps: {args.max_steps}")
+    print(f"  Base height: {args.base_height}")
 
     controller = Jingchu03SimController(
         xml_file=args.xml,
@@ -229,6 +253,7 @@ def main():
         limit_fps=bool(args.limit_fps),
         control_frequency=args.control_frequency,
         max_steps=args.max_steps,
+        base_height=args.base_height,
     )
     controller.run()
 
