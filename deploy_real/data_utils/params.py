@@ -60,12 +60,30 @@ DEFAULT_MIMIC_OBS_TODDY = np.concatenate([
                     ])
                 ])
 
+DEFAULT_MIMIC_OBS_JINGCHU03_UPPER_BODY = np.concatenate([
+                    np.array([0, 0]),  # xy velocity
+                    np.array([0.8]),   # z position
+                    np.array([0, 0]),  # roll/pitch
+                    np.array([0]),     # yaw angular velocity
+                    # 16 dof
+                    np.array([
+                        0.0, 0.0,       # waist_roll, waist_yaw
+                        0.0, 0.4, 0.0,  # left shoulder pitch/roll/yaw
+                        1.2, 0.0,       # left elbow pitch/yaw
+                        0.0, 0.0,       # left wrist pitch/roll
+                        0.0, 0.4, 0.0,  # right shoulder pitch/roll/yaw
+                        1.2, 0.0,       # right elbow pitch/yaw
+                        0.0, 0.0,       # right wrist pitch/roll
+                    ])
+                ])
+
 DEFAULT_MIMIC_OBS = {
     "unitree_g1": DEFAULT_MIMIC_OBS_G1,
     "unitree_g1_mixed_mode": DEFAULT_MIMIC_OBS_G1_MIXED_MODE,
     "unitree_g1_with_hands": DEFAULT_MIMIC_OBS_G1,
     "booster_t1": DEFAULT_MIMIC_OBS_T1,
     "stanford_toddy": DEFAULT_MIMIC_OBS_TODDY,
+    "jingchu03_upper_body": DEFAULT_MIMIC_OBS_JINGCHU03_UPPER_BODY,
 }
 
 

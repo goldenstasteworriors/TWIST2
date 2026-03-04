@@ -4,7 +4,6 @@ import time
 import redis
 import json
 import numpy as np
-import isaacgym
 import torch
 from rich import print
 import os
@@ -15,6 +14,72 @@ from pose.utils.motion_lib_pkl import MotionLib
 from data_utils.rot_utils import euler_from_quaternion_torch, quat_rotate_inverse_torch
 
 from data_utils.params import DEFAULT_MIMIC_OBS
+
+try:
+    import isaacgym  # noqa: F401
+except Exception:
+    isaacgym = None
+
+
+ROBOT_SIM_CONFIGS = {
+    "unitree_g1": {
+        "xml_file": "../assets/g1/g1_mocap_29dof.xml",
+        "robot_base": "pelvis",
+        "floating_base": True,
+    },
+    "unitree_g1_with_hands": {
+        "xml_file": "../assets/g1/g1_mocap_29dof.xml",
+        "robot_base": "pelvis",
+        "floating_base": True,
+    },
+    "jingchu03_upper_body": {
+        "xml_file": "../assets/jingchu03/jingchu03_upper_body.xml",
+        "robot_base": "waist_yaw",
+        "floating_base": False,
+    },
+}
+
+
+def map_motion_dof_to_robot(robot_type: str, dof_pos: torch.Tensor) -> torch.Tensor:
+    """Map source motion dof to target robot dof."""
+    if robot_type in ("unitree_g1", "unitree_g1_with_hands"):
+        return dof_pos
+
+    if robot_type != "jingchu03_upper_body":
+        raise ValueError(f"robot type {robot_type} not supported")
+
+    src_dofs = dof_pos.shape[-1]
+    if src_dofs == 16:
+        return dof_pos
+    if src_dofs != 29:
+        raise ValueError(f"jingchu03_upper_body expects source dof=29 or 16, got {src_dofs}")
+
+    # Source is G1-29DoF motion, target is Jingchu03 upper-body 16DoF.
+    # Target order:
+    # [waist_roll, waist_yaw, l_shoulder_pitch, l_shoulder_roll, l_shoulder_yaw,
+    #  l_elbow_pitch, l_elbow_yaw, l_wrist_pitch, l_wrist_roll,
+    #  r_shoulder_pitch, r_shoulder_roll, r_shoulder_yaw,
+    #  r_elbow_pitch, r_elbow_yaw, r_wrist_pitch, r_wrist_roll]
+    zero_ref = dof_pos[..., 0] * 0.0
+    mapped = torch.stack([
+        dof_pos[..., 13],  # waist_roll
+        dof_pos[..., 12],  # waist_yaw
+        dof_pos[..., 15],  # left_shoulder_pitch
+        dof_pos[..., 16],  # left_shoulder_roll
+        dof_pos[..., 17],  # left_shoulder_yaw
+        dof_pos[..., 18],  # left_elbow_pitch
+        zero_ref,          # left_elbow_yaw (no corresponding DoF in G1)
+        dof_pos[..., 20],  # left_wrist_pitch
+        dof_pos[..., 19],  # left_wrist_roll
+        dof_pos[..., 22],  # right_shoulder_pitch
+        dof_pos[..., 23],  # right_shoulder_roll
+        dof_pos[..., 24],  # right_shoulder_yaw
+        dof_pos[..., 25],  # right_elbow_pitch
+        zero_ref,          # right_elbow_yaw (no corresponding DoF in G1)
+        dof_pos[..., 27],  # right_wrist_pitch
+        dof_pos[..., 26],  # right_wrist_roll
+    ], dim=-1)
+    return mapped
 
 
 def build_mimic_obs(
@@ -53,6 +118,7 @@ def build_mimic_obs(
     root_ang_vel = root_ang_vel.reshape(1, -1, 3)
 
     root_pos = root_pos.reshape(1, -1, 3)
+    dof_pos = map_motion_dof_to_robot(robot_type, dof_pos)
     dof_pos = dof_pos.reshape(1, -1, dof_pos.shape[-1])
     
     # mimic_obs_buf = torch.cat((
@@ -98,13 +164,16 @@ def build_mimic_obs(
             root_vel.detach().cpu().numpy().squeeze(), root_ang_vel.detach().cpu().numpy().squeeze()
 
 
-def main(args, xml_file, robot_base):
+def main(args, xml_file, robot_base, floating_base):
     # Remote control state  
     motion_started = False if args.use_remote_control else True
     
     if args.use_remote_control:
         print("[Motion Server] Remote control enabled. Waiting for start signal from robot controller...")
 
+    viewer = None
+    sim_model = None
+    sim_data = None
     if args.vis:
         sim_model = mujoco.MjModel.from_xml_path(xml_file)
         sim_data = mujoco.MjData(sim_model)
@@ -224,12 +293,13 @@ def main(args, xml_file, robot_base):
             print(f"Step {t_step:4d} => mimic_obs shape = {mimic_obs.shape} published...", end="\r")
 
             if args.vis:
-                sim_data.qpos[:3] = root_pos
-                # filp rot
-                # root_rot = root_rot[[1,2,3,0]]
-                root_rot = root_rot[[3,0,1,2]]
-                sim_data.qpos[3:7] = root_rot
-                sim_data.qpos[7:] = dof_pos
+                if floating_base:
+                    sim_data.qpos[:3] = root_pos
+                    root_rot = root_rot[[3, 0, 1, 2]]
+                    sim_data.qpos[3:7] = root_rot
+                    sim_data.qpos[7:7 + dof_pos.shape[0]] = dof_pos
+                else:
+                    sim_data.qpos[:dof_pos.shape[0]] = dof_pos
                 mujoco.mj_forward(sim_model, sim_data)
                 robot_base_pos = sim_data.xpos[sim_model.body(robot_base).id]
                 viewer.cam.lookat = robot_base_pos
@@ -258,7 +328,8 @@ def main(args, xml_file, robot_base):
             time.sleep(control_dt)
         redis_client.set(f"action_body_{args.robot}", json.dumps(target_mimic_obs.tolist()))
         last_mimic_obs = target_mimic_obs
-        viewer.close()
+        if viewer is not None:
+            viewer.close()
         time.sleep(0.5)
         exit()
     finally:
@@ -272,7 +343,8 @@ def main(args, xml_file, robot_base):
             time.sleep(control_dt)
         redis_client.set(f"action_body_{args.robot}", json.dumps(target_mimic_obs.tolist()))
         last_mimic_obs = target_mimic_obs
-        viewer.close()
+        if viewer is not None:
+            viewer.close()
         time.sleep(0.5)
         exit()
     
@@ -282,7 +354,12 @@ if __name__ == "__main__":
     parser.add_argument("--motion_file", help="Path to your *.pkl motion file for MotionLib", 
                         default="../motion_data/OMOMO_g1_GMR/sub1_clothesstand_067.pkl"
                         )
-    parser.add_argument("--robot", type=str, default="unitree_g1_with_hands", choices=["unitree_g1", "unitree_g1_with_hands"])
+    parser.add_argument(
+        "--robot",
+        type=str,
+        default="unitree_g1_with_hands",
+        choices=list(ROBOT_SIM_CONFIGS.keys()),
+    )
     parser.add_argument("--steps", type=str,
                         # default="1,3,5,10,15,20,30,40,50",
                         default="1",
@@ -302,11 +379,9 @@ if __name__ == "__main__":
     
     HERE = os.path.dirname(os.path.abspath(__file__))
     
-    if args.robot == "unitree_g1" or args.robot == "unitree_g1_with_hands":
-        xml_file = f"{HERE}/../assets/g1/g1_mocap_29dof.xml"
-        robot_base = "pelvis"
-    else:
-        raise ValueError(f"robot type {args.robot} not supported")
-    
-    
-    main(args, xml_file, robot_base)
+    robot_cfg = ROBOT_SIM_CONFIGS[args.robot]
+    xml_file = f"{HERE}/{robot_cfg['xml_file']}"
+    robot_base = robot_cfg["robot_base"]
+    floating_base = robot_cfg["floating_base"]
+
+    main(args, xml_file, robot_base, floating_base)

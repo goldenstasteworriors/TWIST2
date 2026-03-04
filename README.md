@@ -229,6 +229,17 @@ Std Policy FPS: 1.92
 Expected FPS (from decimation): 50.00
 ```
 
+For `jingchu03` upper-body-only robot (`assets/jingchu03`), use:
+```bash
+bash run_motion_server_jingchu03.sh
+```
+and in another terminal:
+```bash
+bash sim2sim_jingchu03.sh
+```
+- This pipeline maps G1 upper-body motion to jingchu03's 16-DoF upper-body joints.
+- The low-level server uses direct mimic tracking (PD), no ONNX policy is required.
+
 And now you can control the robot via high-level motion streaming.
 
 **Note**: you need to open another terminal to run the high-level motion streaming.
