@@ -81,23 +81,25 @@ def map_motion_dof_to_robot(robot_type: str, dof_pos: torch.Tensor) -> torch.Ten
     #  r_shoulder_pitch, r_shoulder_roll, r_shoulder_yaw,
     #  r_elbow_pitch, r_elbow_yaw, r_wrist_pitch, r_wrist_roll]
     zero_ref = dof_pos[..., 0] * 0.0
+    # Pitch-axis polarity differs between source G1 motion and jingchu03 upper-body model.
+    # Negating pitch-related DoFs keeps forward/backward reaching direction consistent.
     mapped = torch.stack([
-        dof_pos[..., 13],  # waist_roll
-        dof_pos[..., 12],  # waist_yaw
-        dof_pos[..., 15],  # left_shoulder_pitch
-        dof_pos[..., 16],  # left_shoulder_roll
-        dof_pos[..., 17],  # left_shoulder_yaw
-        dof_pos[..., 18],  # left_elbow_pitch
-        zero_ref,          # left_elbow_yaw (no corresponding DoF in G1)
-        dof_pos[..., 20],  # left_wrist_pitch
-        dof_pos[..., 19],  # left_wrist_roll
-        dof_pos[..., 22],  # right_shoulder_pitch
-        dof_pos[..., 23],  # right_shoulder_roll
-        dof_pos[..., 24],  # right_shoulder_yaw
-        dof_pos[..., 25],  # right_elbow_pitch
-        zero_ref,          # right_elbow_yaw (no corresponding DoF in G1)
-        dof_pos[..., 27],  # right_wrist_pitch
-        dof_pos[..., 26],  # right_wrist_roll
+        dof_pos[..., 13],   # waist_roll
+        dof_pos[..., 12],   # waist_yaw
+        -dof_pos[..., 15],  # left_shoulder_pitch
+        dof_pos[..., 16],   # left_shoulder_roll
+        dof_pos[..., 17],   # left_shoulder_yaw
+        -dof_pos[..., 18],  # left_elbow_pitch
+        zero_ref,           # left_elbow_yaw (no corresponding DoF in G1)
+        -dof_pos[..., 20],  # left_wrist_pitch
+        dof_pos[..., 19],   # left_wrist_roll
+        -dof_pos[..., 22],  # right_shoulder_pitch
+        dof_pos[..., 23],   # right_shoulder_roll
+        dof_pos[..., 24],   # right_shoulder_yaw
+        -dof_pos[..., 25],  # right_elbow_pitch
+        zero_ref,           # right_elbow_yaw (no corresponding DoF in G1)
+        -dof_pos[..., 27],  # right_wrist_pitch
+        dof_pos[..., 26],   # right_wrist_roll
     ], dim=-1)
     return mapped
 
