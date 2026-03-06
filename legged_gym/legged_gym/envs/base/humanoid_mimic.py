@@ -106,7 +106,12 @@ class HumanoidMimic(HumanoidChar):
         self._ref_root_rot = torch.zeros_like(self.root_states[:, 3:7])
         self._ref_root_vel = torch.zeros_like(self.root_states[:, 7:10])
         self._ref_root_ang_vel = torch.zeros_like(self.root_states[:, 10:13])
-        self._ref_body_pos = torch.zeros_like(self.rigid_body_states[..., 0:3])
+        motion_num_bodies = len(self._motion_lib._body_link_list)
+        self._ref_body_pos = torch.zeros(
+            (self.num_envs, motion_num_bodies, 3),
+            device=self.device,
+            dtype=torch.float,
+        )
         self._ref_dof_pos = torch.zeros_like(self.dof_pos)
         self._ref_dof_vel = torch.zeros_like(self.dof_vel)
         self._ref_root_pos_delta_local = torch.zeros_like(self.root_states[:, 0:3])
@@ -118,10 +123,45 @@ class HumanoidMimic(HumanoidChar):
         else:
             self._dof_err_w = torch.tensor(self._dof_err_w, device=self.device, dtype=torch.float)
         
-        self._key_body_ids_motion = self._motion_lib.get_key_body_idx(key_body_names=self.cfg.motion.key_bodies)
+        motion_key_bodies = getattr(self.cfg.motion, "motion_key_bodies", self.cfg.motion.key_bodies)
+        self._key_body_ids_motion = self._motion_lib.get_key_body_idx(key_body_names=motion_key_bodies)
+        assert len(self._key_body_ids_motion) == len(self._key_body_ids), \
+            f"motion key body count ({len(self._key_body_ids_motion)}) must match robot key body count ({len(self._key_body_ids)})"
+
+        motion_dof_map = getattr(self.cfg.motion, "motion_dof_map", None)
+        self._motion_dof_map = None
+        if motion_dof_map is not None:
+            self._motion_dof_map = torch.tensor(motion_dof_map, device=self.device, dtype=torch.long)
+            assert self._motion_dof_map.numel() == self.num_dof, \
+                f"motion_dof_map length ({self._motion_dof_map.numel()}) must match robot dof ({self.num_dof})"
+
         # compare two tensors are same
         # assert torch.equal(self._key_body_ids, torch.tensor(key_body_ids_motion, device=self.device, dtype=torch.long)), \
         #     f"Key body ids mismatch: {self._key_body_ids} vs {key_body_ids_motion}"
+
+    def _map_motion_dof(self, dof_tensor):
+        if self._motion_dof_map is None:
+            return dof_tensor
+        if dof_tensor.shape[-1] == self._motion_dof_map.numel():
+            return dof_tensor
+
+        valid_mask = self._motion_dof_map >= 0
+        if valid_mask.any():
+            max_src_idx = self._motion_dof_map[valid_mask].max().item()
+            if max_src_idx >= dof_tensor.shape[-1]:
+                raise ValueError(
+                    f"motion_dof_map index out of range: max {max_src_idx}, source dof {dof_tensor.shape[-1]}"
+                )
+
+        mapped = torch.zeros(
+            *dof_tensor.shape[:-1],
+            self._motion_dof_map.numel(),
+            device=dof_tensor.device,
+            dtype=dof_tensor.dtype,
+        )
+        if valid_mask.any():
+            mapped[..., valid_mask] = dof_tensor[..., self._motion_dof_map[valid_mask]]
+        return mapped
     
     def _reset_ref_motion(self, env_ids, motion_ids=None):
         n = len(env_ids)
@@ -149,6 +189,8 @@ class HumanoidMimic(HumanoidChar):
         self._motion_time_offsets[env_ids] = motion_times
         
         root_pos, root_rot, root_vel, root_ang_vel, dof_pos, dof_vel, body_pos, root_pos_delta_local, root_rot_delta_local = self._motion_lib.calc_motion_frame(motion_ids, motion_times)
+        dof_pos = self._map_motion_dof(dof_pos)
+        dof_vel = self._map_motion_dof(dof_vel)
         root_pos[:, 2] += self.cfg.motion.height_offset
         
         
@@ -172,6 +214,8 @@ class HumanoidMimic(HumanoidChar):
         motion_ids = self._motion_ids
         motion_times = self._get_motion_times()
         root_pos, root_rot, root_vel, root_ang_vel, dof_pos, dof_vel, body_pos, root_pos_delta_local, root_rot_delta_local = self._motion_lib.calc_motion_frame(motion_ids, motion_times)
+        dof_pos = self._map_motion_dof(dof_pos)
+        dof_vel = self._map_motion_dof(dof_vel)
         root_pos[:, 2] += self.cfg.motion.height_offset
         root_pos[:, :2] += self.episode_init_origin[:, :2]
         
@@ -290,6 +334,8 @@ class HumanoidMimic(HumanoidChar):
         if len(hard_sync_env_ids) == 0:
             return
         root_pos, root_rot, root_vel, root_ang_vel, dof_pos, dof_vel, body_pos = self._motion_lib.calc_motion_frame(self._motion_ids, motion_times*0)
+        dof_pos = self._map_motion_dof(dof_pos)
+        dof_vel = self._map_motion_dof(dof_vel)
         self._reset_dofs(hard_sync_env_ids, dof_pos, dof_vel*0.8)
         self._reset_root_states(env_ids=hard_sync_env_ids, root_vel=root_vel*0.8, root_quat=root_rot, root_pos=root_pos, root_ang_vel=root_ang_vel*0.8)
         self.gym.simulate(self.sim)
@@ -404,16 +450,24 @@ class HumanoidMimic(HumanoidChar):
             self._update_max_key_body_error()
             
     def check_termination(self):
+        fixed_base = getattr(self.cfg.asset, "fix_base_link", False)
         contact_force_termination = torch.any(torch.norm(self.contact_forces[:, self.termination_contact_indices, :], dim=-1) > 1., dim=1)
         self.reset_buf = contact_force_termination.clone()
         
-        # height_cutoff = self.root_states[:, 2] < self.cfg.rewards.termination_height
-        root_height_diff = torch.abs(self.root_states[:, 2] - self._ref_root_pos[:, 2])
-        height_cutoff = root_height_diff > self.cfg.rewards.root_height_diff_threshold
+        # Fixed-base tasks should not terminate on root pose/velocity drift.
+        if fixed_base:
+            root_height_diff = torch.zeros_like(self.root_states[:, 2])
+            height_cutoff = torch.zeros_like(self.reset_buf)
+            roll_cut = torch.zeros_like(self.reset_buf)
+            pitch_cut = torch.zeros_like(self.reset_buf)
+            vel_too_large = torch.zeros_like(self.reset_buf)
+        else:
+            root_height_diff = torch.abs(self.root_states[:, 2] - self._ref_root_pos[:, 2])
+            height_cutoff = root_height_diff > self.cfg.rewards.root_height_diff_threshold
+            roll_cut = torch.abs(self.roll) > self.cfg.rewards.termination_roll
+            pitch_cut = torch.abs(self.pitch) > self.cfg.rewards.termination_pitch
+            vel_too_large = torch.norm(self.root_states[:, 7:10], dim=-1) > 5.
 
-
-        roll_cut = torch.abs(self.roll) > self.cfg.rewards.termination_roll
-        pitch_cut = torch.abs(self.pitch) > self.cfg.rewards.termination_pitch
         self.reset_buf |= roll_cut
         self.reset_buf |= pitch_cut
         motion_end = self.episode_length_buf * self.dt >= self._motion_lib.get_motion_length(self._motion_ids)
@@ -427,13 +481,11 @@ class HumanoidMimic(HumanoidChar):
             self.time_out_buf |= motion_end
         
         self.reset_buf |= self.time_out_buf
-        
-        vel_too_large = torch.norm(self.root_states[:, 7:10], dim=-1) > 5.
         self.reset_buf |= vel_too_large
         
         if self._pose_termination:
             body_pos = self.rigid_body_states[:, self._key_body_ids, 0:3] - self.rigid_body_states[:, 0:1, 0:3]
-            tar_body_pos = self._ref_body_pos[:, self._key_body_ids] - self._ref_root_pos[:, None, :] 
+            tar_body_pos = self._ref_body_pos[:, self._key_body_ids_motion] - self._ref_root_pos[:, None, :] 
             
             if not self.global_obs:
                 body_pos = convert_to_local_root_body_pos(self.root_states[:, 3:7], body_pos)
@@ -458,7 +510,7 @@ class HumanoidMimic(HumanoidChar):
                 # use a fixed pose termination distance
                 pose_fail = body_pos_dist > self._pose_termination_dist ** 2
             
-            if self._track_root:
+            if self._track_root and not fixed_base:
                 root_pos_diff = self._ref_root_pos[:, 0:2] - self.root_states[:, 0:2]
                 root_pos_dist = torch.sum(root_pos_diff * root_pos_diff, dim=-1)
                 root_pos_fail = root_pos_dist > self._root_tracking_termination_dist ** 2
@@ -513,6 +565,8 @@ class HumanoidMimic(HumanoidChar):
         motion_ids_tiled = motion_ids_tiled.flatten()
         obs_motion_times = obs_motion_times.flatten()
         root_pos, root_rot, root_vel, root_ang_vel, dof_pos, dof_vel, body_pos = self._motion_lib.calc_motion_frame(motion_ids_tiled, obs_motion_times)
+        dof_pos = self._map_motion_dof(dof_pos)
+        dof_vel = self._map_motion_dof(dof_vel)
         
         # Apply motion domain randomization noise
         root_pos, root_rot, root_vel, root_ang_vel, dof_pos, dof_vel = self._apply_motion_domain_randomization(
@@ -823,7 +877,7 @@ class HumanoidMimic(HumanoidChar):
         
         # key_body_pos = convert_to_local_root_body_pos(self.root_states[:, 3:7], key_body_pos)
         key_body_pos = convert_to_local_root_body_pos(base_yaw_quat, key_body_pos)
-        tar_key_body_pos = self._ref_body_pos[:, self._key_body_ids, :]
+        tar_key_body_pos = self._ref_body_pos[:, self._key_body_ids_motion, :]
         tar_key_body_pos = tar_key_body_pos - self._ref_root_pos.unsqueeze(1)
         _, _, ref_yaw = euler_from_quaternion(self._ref_root_rot)
         ref_yaw_quat = quat_from_euler_xyz(0*ref_yaw, 0*ref_yaw, ref_yaw)
@@ -841,7 +895,7 @@ class HumanoidMimic(HumanoidChar):
         key_body_pos = self.rigid_body_states[:, self._key_body_ids, 0:3] # (num_envs, num_key_bodies, 3)
         # key_body_pos = key_body_pos - self.root_states[:, 0:3].unsqueeze(1)
         
-        tar_key_body_pos = self._ref_body_pos[:, self._key_body_ids, :]
+        tar_key_body_pos = self._ref_body_pos[:, self._key_body_ids_motion, :]
         # tar_key_body_pos = tar_key_body_pos - self._ref_root_pos.unsqueeze(1)
         
         key_body_pos_diff = key_body_pos - tar_key_body_pos
@@ -997,7 +1051,7 @@ class HumanoidMimic(HumanoidChar):
             base_yaw_quat = quat_from_euler_xyz(0*self.yaw, 0*self.yaw, self.yaw)
             # key_body_pos = convert_to_local_root_body_pos(self.root_states[:, 3:7], key_body_pos)
             key_body_pos = convert_to_local_root_body_pos(base_yaw_quat, key_body_pos)
-        tar_key_body_pos = self._ref_body_pos[:, self._key_body_ids, :]
+        tar_key_body_pos = self._ref_body_pos[:, self._key_body_ids_motion, :]
         tar_key_body_pos = tar_key_body_pos - self._ref_root_pos.unsqueeze(1)
         if not self.global_obs:
             _, _, ref_yaw = euler_from_quaternion(self._ref_root_rot)
@@ -1017,7 +1071,7 @@ class HumanoidMimic(HumanoidChar):
             base_yaw_quat = quat_from_euler_xyz(0*self.yaw, 0*self.yaw, self.yaw)
             key_body_pos = convert_to_local_root_body_pos(base_yaw_quat, key_body_pos)
         
-        tar_key_body_pos = self._ref_body_pos[:, self._key_body_ids, :]
+        tar_key_body_pos = self._ref_body_pos[:, self._key_body_ids_motion, :]
         tar_key_body_pos = tar_key_body_pos - self._ref_root_pos.unsqueeze(1)
         if not self.global_obs:
             _, _, ref_yaw = euler_from_quaternion(self._ref_root_rot)

@@ -196,6 +196,19 @@ bash train.sh 1021_twist2 cuda:0
 - arg 1: policy expid
 - arg 2: cuda device id
 
+For `jingchu03` upper-body training:
+```bash
+# 1) teacher
+bash train.sh 0304_jingchu03_priv cuda:0 jingchu03 priv_mimic
+
+# 2) student future (distill from teacher)
+bash train.sh 0304_jingchu03_stu cuda:0 jingchu03 stu_future 0304_jingchu03_priv
+```
+- arg 3: robot name (`jingchu03`)
+- arg 4: task suffix (`priv_mimic` or `stu_future`)
+- arg 5 (optional): teacher experiment id for student training
+- `jingchu03` training can directly use G1 TWIST2 motion (`twist2_dataset.yaml`) via online 29->16 dof mapping.
+
 **2**. Export policy to onnx model:
 ```bash
 bash to_onnx.sh $YOUR_POLICY_PATH

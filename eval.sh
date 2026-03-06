@@ -1,13 +1,16 @@
 
 # bash eval.sh 1002_twist2 cuda:1
+# bash eval.sh 0304_jingchu03_stu cuda:0 jingchu03 stu_future
 
 
 
-# motion_file="/home/yanjieze/projects/g1_wbc/TWIST-dev/motion_data/v1_v2_v3_g1/0807_yanjie_walk_001.pkl"
-motion_file="/home/yanjieze/projects/g1_wbc/TWIST-dev/motion_data/twist1_to_twist2/transitions_walksideways_walkbackwards.pkl"
+script_dir=$(dirname "$(realpath "$0")")
+motion_file="${script_dir}/assets/example_motions/0807_yanjie_walk_001.pkl"
 
-task_name="g1_stu_future"
-proj_name="g1_stu_future"
+robot_name=${3:-g1}
+task_suffix=${4:-stu_future}
+task_name="${robot_name}_${task_suffix}"
+proj_name="${task_name}"
 exptid=$1
 device=$2
 

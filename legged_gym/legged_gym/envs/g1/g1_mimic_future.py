@@ -112,6 +112,8 @@ class G1MimicFuture(G1MimicDistill):
         
         root_pos, root_rot, root_vel, root_ang_vel, dof_pos, dof_vel, body_pos, root_pos_delta_local, root_rot_delta_local = \
             self._motion_lib.calc_motion_frame(motion_ids_tiled, obs_motion_times)
+        dof_pos = self._map_motion_dof(dof_pos)
+        dof_vel = self._map_motion_dof(dof_vel)
         
         # Apply motion domain randomization noise (unified for all frames)
         root_pos, root_rot, root_vel, root_ang_vel, dof_pos, dof_vel = self._apply_motion_domain_randomization(
@@ -294,10 +296,11 @@ class G1MimicFuture(G1MimicDistill):
         elif self.cfg.noise.add_noise and not self.headless:
             proprio_obs_buf += (2 * torch.rand_like(proprio_obs_buf) - 1) * self.noise_scale_vec
         
-        # Disable ankle dof velocity (same as parent)
+        # Disable configured dof velocity channels (defaults to ankle indices for g1).
         dof_vel_start_dim = 3 + 2 + self.dof_pos.shape[1]
-        ankle_idx = [4, 5, 10, 11]
-        proprio_obs_buf[:, [dof_vel_start_dim + i for i in ankle_idx]] = 0.
+        disable_dof_vel_indices = getattr(self.cfg.asset, "disable_dof_vel_indices", [4, 5, 10, 11])
+        if len(disable_dof_vel_indices) > 0:
+            proprio_obs_buf[:, [dof_vel_start_dim + i for i in disable_dof_vel_indices]] = 0.
         
         # Private information for critic (same as parent)
         key_body_pos = self.rigid_body_states[:, self._key_body_ids, :3]

@@ -163,6 +163,9 @@ class G1MimicPrivCfg(HumanoidMimicCfg):
 
         feet_bodies = ['left_ankle_roll_link', 'right_ankle_roll_link']
         n_lower_body_dofs: int = 12
+        disable_dof_vel_indices = [4, 5, 10, 11]
+        ankle_dof_indices = [4, 5, 10, 11]
+        waist_dof_indices = [13, 14]
 
         penalize_contacts_on = ["shoulder", "elbow", "hip", "knee"]
         terminate_after_contacts_on = []

@@ -432,7 +432,8 @@ class HumanoidChar(LeggedRobot):
             sphere_size = 0.04
             
         geom = gymutil.WireframeSphereGeometry(sphere_size, 32, 32, None, color=color)
-        ref_key_body_pos = self._ref_body_pos[:, self._key_body_ids, :3] - self._ref_root_pos[:, None, :]
+        ref_key_ids = self._key_body_ids_motion if hasattr(self, "_key_body_ids_motion") else self._key_body_ids
+        ref_key_body_pos = self._ref_body_pos[:, ref_key_ids, :3] - self._ref_root_pos[:, None, :]
         ref_key_body_pos_local = convert_to_local_root_body_pos(self._ref_root_rot, ref_key_body_pos)
         draw_root_pos = self.root_states[:, :3].clone()
         draw_root_pos[:, 2] = self._ref_root_pos[:, 2]
@@ -462,7 +463,7 @@ class HumanoidChar(LeggedRobot):
             # color = (0, 1, 1)
             color = (0, 1, 0)
             geom = gymutil.WireframeSphereGeometry(sphere_size, 32, 32, None, color=color)
-            ref_key_body_pos = self._ref_body_pos[:, self._key_body_ids, :3]        
+            ref_key_body_pos = self._ref_body_pos[:, ref_key_ids, :3]        
             for id in range(self.num_envs):
                 for i in range(ref_key_body_pos.shape[1]):
                     pose = gymapi.Transform(gymapi.Vec3(ref_key_body_pos[id, i, 0], ref_key_body_pos[id, i, 1], ref_key_body_pos[id, i, 2]), r=None)

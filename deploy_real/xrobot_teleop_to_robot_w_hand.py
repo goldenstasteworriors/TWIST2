@@ -44,7 +44,7 @@ from tqdm import tqdm
 import cv2
 import redis
 from rich import print
-from general_motion_retargeting import XRobotStreamer
+
 
 from data_utils.params import DEFAULT_MIMIC_OBS, DEFAULT_HAND_POSE
 from data_utils.rot_utils import euler_from_quaternion_np, quat_diff_np, quat_rotate_inverse_np
@@ -403,8 +403,19 @@ class XRobotTeleopToRobot:
 
     def setup_teleop_data_streamer(self):
         """Initialize and start the teleop data streamer"""
-        self.teleop_data_streamer = XRobotStreamer()
-        print("Teleop data streamer initialized")
+        try:
+            # Lazy import so we can provide a clearer error if the VR SDK is missing.
+            from general_motion_retargeting import XRobotStreamer
+            self.teleop_data_streamer = XRobotStreamer()
+            print("Teleop data streamer initialized")
+        except Exception as exc:
+            raise RuntimeError(
+                "XRobotStreamer 初始化失败。\n"
+                "这通常表示 VR 数据流依赖的 `xrobotoolkit_sdk` 未安装/未正确加载（你日志里也提示了 'xrobotoolkit_sdk not found'）。\n"
+                "处理方式：\n"
+                "- 如果你要从 VR 设备读数据：请按 XRobot/GMR 的安装说明把 `xrobotoolkit_sdk` 安装到当前 Python 环境，并确保可被 import。\n"
+                "- 如果你当前不打算使用 VR 遥操作：需要改用不依赖 XRobotStreamer 的数据源（当前脚本默认必须有 VR 数据流）。"
+            ) from exc
         
     def setup_redis_connection(self):
         """Setup Redis connection"""

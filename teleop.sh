@@ -1,6 +1,6 @@
 # sudo ufw disable
 
-source ~/miniconda3/bin/activate gmr
+source ~/miniconda3/bin/activate gmr_for_twist2
 
 cd deploy_real
 

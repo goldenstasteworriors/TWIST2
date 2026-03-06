@@ -39,6 +39,8 @@ class G1MimicDistill(HumanoidMimic):
         self._motion_time_offsets[env_ids] = motion_times
         
         root_pos, root_rot, root_vel, root_ang_vel, dof_pos, dof_vel, body_pos, root_pos_delta_local, root_rot_delta_local = self._motion_lib.calc_motion_frame(motion_ids, motion_times)
+        dof_pos = self._map_motion_dof(dof_pos)
+        dof_vel = self._map_motion_dof(dof_vel)
         root_pos[:, 2] += self.cfg.motion.height_offset
         self._ref_root_pos[env_ids] = root_pos
         self._ref_root_rot[env_ids] = root_rot
@@ -55,6 +57,8 @@ class G1MimicDistill(HumanoidMimic):
         motion_ids = self._motion_ids
         motion_times = self._get_motion_times()
         root_pos, root_rot, root_vel, root_ang_vel, dof_pos, dof_vel, body_pos, root_pos_delta_local, root_rot_delta_local = self._motion_lib.calc_motion_frame(motion_ids, motion_times)
+        dof_pos = self._map_motion_dof(dof_pos)
+        dof_vel = self._map_motion_dof(dof_vel)
         root_pos[:, 2] += self.cfg.motion.height_offset
         root_pos[:, :2] += self.episode_init_origin[:, :2]
         
@@ -128,6 +132,8 @@ class G1MimicDistill(HumanoidMimic):
         motion_ids_tiled = motion_ids_tiled.flatten()
         obs_motion_times = obs_motion_times.flatten()
         root_pos, root_rot, root_vel, root_ang_vel, dof_pos, dof_vel, body_pos, root_pos_delta_local, root_rot_delta_local = self._motion_lib.calc_motion_frame(motion_ids_tiled, obs_motion_times)
+        dof_pos = self._map_motion_dof(dof_pos)
+        dof_vel = self._map_motion_dof(dof_vel)
         
         roll, pitch, yaw = euler_from_quaternion(root_rot)
         roll = roll.reshape(self.num_envs, num_steps, 1)
@@ -206,9 +212,10 @@ class G1MimicDistill(HumanoidMimic):
             proprio_obs_buf += 0.
         dof_vel_start_dim = 3 + 2 + self.dof_pos.shape[1]
 
-        # disable ankle dof velocity
-        ankle_idx = [4, 5, 10, 11]
-        proprio_obs_buf[:, [dof_vel_start_dim + i for i in ankle_idx]] = 0.
+        # Disable configured dof velocity channels (defaults to ankle indices for g1).
+        disable_dof_vel_indices = getattr(self.cfg.asset, "disable_dof_vel_indices", [4, 5, 10, 11])
+        if len(disable_dof_vel_indices) > 0:
+            proprio_obs_buf[:, [dof_vel_start_dim + i for i in disable_dof_vel_indices]] = 0.
         
         key_body_pos = self.rigid_body_states[:, self._key_body_ids, :3]
         key_body_pos = key_body_pos - self.root_states[:, None, :3]
@@ -294,20 +301,31 @@ class G1MimicDistill(HumanoidMimic):
 ############################################################################################################
 
     def _reward_waist_dof_acc(self):
-        waist_dof_idx = [13, 14]
+        waist_dof_idx = getattr(self.cfg.asset, "waist_dof_indices", [13, 14])
+        if len(waist_dof_idx) == 0:
+            return torch.zeros(self.num_envs, device=self.device)
         return torch.sum(torch.square((self.last_dof_vel - self.dof_vel) / self.dt)[:, waist_dof_idx], dim=1)
     
     def _reward_waist_dof_vel(self):
-        waist_dof_idx = [13, 14]
+        waist_dof_idx = getattr(self.cfg.asset, "waist_dof_indices", [13, 14])
+        if len(waist_dof_idx) == 0:
+            return torch.zeros(self.num_envs, device=self.device)
         return torch.sum(torch.square(self.dof_vel[:, waist_dof_idx]), dim=1)
     
     def _reward_ankle_dof_acc(self):
-        ankle_dof_idx = [4, 5, 10, 11]
+        ankle_dof_idx = getattr(self.cfg.asset, "ankle_dof_indices", [4, 5, 10, 11])
+        if len(ankle_dof_idx) == 0:
+            return torch.zeros(self.num_envs, device=self.device)
         return torch.sum(torch.square((self.last_dof_vel - self.dof_vel) / self.dt)[:, ankle_dof_idx], dim=1)
     
     def _reward_ankle_dof_vel(self):
-        ankle_dof_idx = [4, 5, 10, 11]
+        ankle_dof_idx = getattr(self.cfg.asset, "ankle_dof_indices", [4, 5, 10, 11])
+        if len(ankle_dof_idx) == 0:
+            return torch.zeros(self.num_envs, device=self.device)
         return torch.sum(torch.square(self.dof_vel[:, ankle_dof_idx]), dim=1)
     
     def _reward_ankle_action(self):
-        return torch.norm(self.action_history_buf[:, -1, [4, 5, 10, 11]], dim=1)
+        ankle_dof_idx = getattr(self.cfg.asset, "ankle_dof_indices", [4, 5, 10, 11])
+        if len(ankle_dof_idx) == 0:
+            return torch.zeros(self.num_envs, device=self.device)
+        return torch.norm(self.action_history_buf[:, -1, ankle_dof_idx], dim=1)
