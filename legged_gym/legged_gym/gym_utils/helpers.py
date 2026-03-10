@@ -28,6 +28,7 @@
 #
 # Copyright (c) 2021 ETH Zurich, Nikita Rudin
 
+import ast
 import os
 import copy
 import torch
@@ -78,6 +79,10 @@ def set_nested_attr(obj, attr_path, value):
                 value = int(value)
             elif isinstance(existing_value, float):
                 value = float(value)
+            elif isinstance(existing_value, (list, tuple, dict)):
+                value = ast.literal_eval(value)
+        elif value.lower() == 'none':
+            value = None
             # str values are kept as-is
         setattr(obj, final_attr, value)
     else:
