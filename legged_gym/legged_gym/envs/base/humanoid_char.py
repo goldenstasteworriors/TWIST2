@@ -194,7 +194,14 @@ class HumanoidChar(LeggedRobot):
         pass
                                                                                                                                                                                                                                                                                                                                                                    
     def _reset_dofs(self, env_ids, dof_pos, dof_vel):
-        self.dof_pos[env_ids] = dof_pos[env_ids] * torch_rand_float(0.8, 1.2, (len(env_ids), self.num_dof), device=self.device)
+        fixed_base = getattr(self.cfg.asset, "fix_base_link", False)
+        if fixed_base:
+            limit_margin = 1e-4
+            lower = self.dof_pos_limits[:, 0] + limit_margin
+            upper = self.dof_pos_limits[:, 1] - limit_margin
+            self.dof_pos[env_ids] = torch.max(torch.min(dof_pos[env_ids], upper), lower)
+        else:
+            self.dof_pos[env_ids] = dof_pos[env_ids] * torch_rand_float(0.8, 1.2, (len(env_ids), self.num_dof), device=self.device)
         self.dof_vel[env_ids] = dof_vel[env_ids]
 
         env_ids_int32 = env_ids.to(dtype=torch.int32)

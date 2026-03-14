@@ -123,7 +123,17 @@ class HumanoidMimic(HumanoidChar):
         else:
             self._dof_err_w = torch.tensor(self._dof_err_w, device=self.device, dtype=torch.float)
         
+        motion_body_names = getattr(self._motion_lib, "_body_link_list", [])
         motion_key_bodies = getattr(self.cfg.motion, "motion_key_bodies", self.cfg.motion.key_bodies)
+        if all(name in motion_body_names for name in self.cfg.motion.key_bodies):
+            motion_key_bodies = self.cfg.motion.key_bodies
+        else:
+            missing_motion_bodies = [name for name in motion_key_bodies if name not in motion_body_names]
+            if missing_motion_bodies:
+                raise ValueError(
+                    f"Motion key bodies not found in motion data: {missing_motion_bodies}. "
+                    f"Available motion bodies: {motion_body_names}"
+                )
         self._key_body_ids_motion = self._motion_lib.get_key_body_idx(key_body_names=motion_key_bodies)
         assert len(self._key_body_ids_motion) == len(self._key_body_ids), \
             f"motion key body count ({len(self._key_body_ids_motion)}) must match robot key body count ({len(self._key_body_ids)})"
@@ -234,6 +244,22 @@ class HumanoidMimic(HumanoidChar):
         Args:
             env_ids (List[int]): Environemnt ids
         """
+        fixed_base = getattr(self.cfg.asset, "fix_base_link", False)
+        if fixed_base:
+            self.root_states[env_ids] = self.base_init_state
+            self.root_states[env_ids, :3] += self.env_origins[env_ids]
+            self.root_states[env_ids, 7:13] = 0.
+            self.episode_init_origin[env_ids] = self.env_origins[env_ids]
+
+            env_ids_int32 = env_ids.to(dtype=torch.int32)
+            self.gym.set_actor_root_state_tensor_indexed(
+                self.sim,
+                gymtorch.unwrap_tensor(self.root_states),
+                gymtorch.unwrap_tensor(env_ids_int32),
+                len(env_ids_int32),
+            )
+            return
+
         # base position
         if self.custom_origins:
             self.root_states[env_ids] = self.base_init_state
