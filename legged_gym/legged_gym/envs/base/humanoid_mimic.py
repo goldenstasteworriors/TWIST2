@@ -48,7 +48,9 @@ class HumanoidMimic(HumanoidChar):
         self.evaluations = class_to_dict(self.cfg.evaluations)
         self.eval_functions = []
         self.eval_names = []
-        for name, scale in self.evaluations.items():
+        for name, enabled in self.evaluations.items():
+            if not enabled:
+                continue
             self.eval_names.append(name)
             name = '_error_' + name
             self.eval_functions.append(getattr(self, name))

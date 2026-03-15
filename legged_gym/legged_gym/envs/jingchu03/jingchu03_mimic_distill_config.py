@@ -111,6 +111,17 @@ class Jingchu03MimicPrivCfg(G1MimicPrivCfg):
             ankle_dof_acc = 0.0
             ankle_dof_vel = 0.0
 
+    class evaluations(G1MimicPrivCfg.evaluations):
+        tracking_joint_dof = True
+        tracking_joint_vel = True
+        tracking_root_translation = False
+        tracking_root_rotation = False
+        tracking_root_vel = False
+        tracking_root_ang_vel = False
+        tracking_keybody_pos = True
+        tracking_root_pose_delta_local = False
+        tracking_root_rotation_delta_local = False
+
     class motion(G1MimicPrivCfg.motion):
         key_bodies = [
             'left_wrist_roll',
