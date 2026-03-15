@@ -441,11 +441,22 @@ class HumanoidChar(LeggedRobot):
         geom = gymutil.WireframeSphereGeometry(sphere_size, 32, 32, None, color=color)
         ref_key_ids = self._key_body_ids_motion if hasattr(self, "_key_body_ids_motion") else self._key_body_ids
         ref_key_body_pos = self._ref_body_pos[:, ref_key_ids, :3] - self._ref_root_pos[:, None, :]
-        ref_key_body_pos_local = convert_to_local_root_body_pos(self._ref_root_rot, ref_key_body_pos)
         draw_root_pos = self.root_states[:, :3].clone()
-        draw_root_pos[:, 2] = self._ref_root_pos[:, 2]
-        ref_roll, ref_pitch, _ = euler_from_quaternion(self._ref_root_rot)
-        draw_root_rot = quat_from_euler_xyz(ref_roll, ref_pitch, self.yaw)
+
+        # Keep debug visualization consistent with the training-time key body error.
+        # When global_obs is False, the loss compares yaw-aligned local key body positions
+        # rather than full global poses.
+        if hasattr(self, "global_obs") and not self.global_obs:
+            _, _, ref_yaw = euler_from_quaternion(self._ref_root_rot)
+            ref_yaw_quat = quat_from_euler_xyz(0 * ref_yaw, 0 * ref_yaw, ref_yaw)
+            ref_key_body_pos_local = convert_to_local_root_body_pos(ref_yaw_quat, ref_key_body_pos)
+            draw_root_rot = quat_from_euler_xyz(0 * self.yaw, 0 * self.yaw, self.yaw)
+        else:
+            ref_key_body_pos_local = convert_to_local_root_body_pos(self._ref_root_rot, ref_key_body_pos)
+            draw_root_pos[:, 2] = self._ref_root_pos[:, 2]
+            ref_roll, ref_pitch, _ = euler_from_quaternion(self._ref_root_rot)
+            draw_root_rot = quat_from_euler_xyz(ref_roll, ref_pitch, self.yaw)
+
         ref_key_body_pos_global = convert_to_global_root_body_pos(root_pos=draw_root_pos, root_rot=draw_root_rot, body_pos=ref_key_body_pos_local)
         for id in range(self.num_envs):
             for i in range(ref_key_body_pos.shape[1]):
