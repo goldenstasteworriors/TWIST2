@@ -4,18 +4,6 @@ from legged_gym.envs.g1.g1_mimic_distill_config import G1MimicPrivCfg, G1MimicPr
 
 JINGCHU03_NUM_ACTIONS = 16
 JINGCHU03_NUM_KEY_BODIES = 5
-# Map source G1-29DoF motion to jingchu03 16DoF order.
-# -1 means this target dof is not provided by source motion and will be filled with 0.
-JINGCHU03_MOTION_DOF_MAP = [
-    13,  # waist_roll
-    12,  # waist_yaw
-    15, 16, 17,  # l_shoulder pitch/roll/yaw
-    18, -1,      # l_elbow pitch/yaw
-    20, 19,      # l_wrist pitch/roll
-    22, 23, 24,  # r_shoulder pitch/roll/yaw
-    25, -1,      # r_elbow pitch/yaw
-    27, 26,      # r_wrist pitch/roll
-]
 
 class Jingchu03MimicPrivCfg(G1MimicPrivCfg):
     class env(G1MimicPrivCfg.env):
@@ -133,17 +121,6 @@ class Jingchu03MimicPrivCfg(G1MimicPrivCfg):
             'right_elbow_pitch',
         ]
 
-        # Key body names in source motion data (G1 naming).
-        motion_key_bodies = [
-            'left_wrist_roll_link',
-            'right_wrist_roll_link',
-            'left_elbow_link',
-            'right_elbow_link',
-            'waist_yaw_link',
-        ]
-
-        # Use source G1 motion directly and map to jingchu03 dof online.
-        motion_dof_map = JINGCHU03_MOTION_DOF_MAP
         motion_file = f"{LEGGED_GYM_ROOT_DIR}/motion_data_configs/twist2_dataset.yaml"
         height_offset = 0.0
         use_adaptive_pose_termination = True

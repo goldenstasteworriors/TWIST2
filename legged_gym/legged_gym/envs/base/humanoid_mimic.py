@@ -145,6 +145,13 @@ class HumanoidMimic(HumanoidChar):
             assert self._motion_dof_map.numel() == self.num_dof, \
                 f"motion_dof_map length ({self._motion_dof_map.numel()}) must match robot dof ({self.num_dof})"
 
+        motion_dof_dim = self._motion_lib._motion_dof_pos.shape[-1]
+        if self._motion_dof_map is None and motion_dof_dim != self.num_dof:
+            raise ValueError(
+                f"Motion DOF mismatch: motion has {motion_dof_dim} dofs, but robot expects {self.num_dof}. "
+                "Provide a robot-specific motion file instead of relying on cross-robot remapping."
+            )
+
         # compare two tensors are same
         # assert torch.equal(self._key_body_ids, torch.tensor(key_body_ids_motion, device=self.device, dtype=torch.long)), \
         #     f"Key body ids mismatch: {self._key_body_ids} vs {key_body_ids_motion}"
