@@ -57,6 +57,7 @@ class HumanoidChar(LeggedRobot):
         
     def _init_buffers(self):
         super()._init_buffers()
+        self._init_fixed_dof_buffers()
         
         self._ref_body_pos = torch.zeros_like(self.rigid_body_states[..., :3])
         self.feet_force_sum = torch.ones(self.num_envs, 2, device=self.device)
@@ -69,6 +70,33 @@ class HumanoidChar(LeggedRobot):
         cprint(f"[HumanoidChar] upper_key_bodies ids: {self._upper_key_body_ids}", "green")
         cprint(f"[HumanoidChar] num of upper key bodies: {len(self._upper_key_body_ids)}", "green")
         self.init_yaw = torch.zeros(self.num_envs, device=self.device)
+
+    def _init_fixed_dof_buffers(self):
+        fixed_dof_indices = getattr(self.cfg.asset, "fixed_dof_indices", [])
+        if len(fixed_dof_indices) == 0:
+            self.fixed_dof_indices = torch.empty(0, dtype=torch.long, device=self.device)
+            self.fixed_dof_pos_targets = torch.empty(0, dtype=torch.float, device=self.device)
+            return
+
+        self.fixed_dof_indices = torch.tensor(fixed_dof_indices, dtype=torch.long, device=self.device)
+        fixed_dof_pos_targets = getattr(self.cfg.asset, "fixed_dof_pos_targets", None)
+        if fixed_dof_pos_targets is None:
+            self.fixed_dof_pos_targets = self.default_dof_pos_all[self.fixed_dof_indices].clone()
+        else:
+            if len(fixed_dof_pos_targets) != len(fixed_dof_indices):
+                raise ValueError("fixed_dof_pos_targets length must match fixed_dof_indices length")
+            self.fixed_dof_pos_targets = torch.tensor(fixed_dof_pos_targets, dtype=torch.float, device=self.device)
+
+    def _apply_fixed_dof_constraints(self, dof_pos=None, dof_vel=None, actions=None):
+        if self.fixed_dof_indices.numel() == 0:
+            return
+
+        if dof_pos is not None:
+            dof_pos[..., self.fixed_dof_indices] = self.fixed_dof_pos_targets
+        if dof_vel is not None:
+            dof_vel[..., self.fixed_dof_indices] = 0.
+        if actions is not None:
+            actions[..., self.fixed_dof_indices] = 0.
 
     def _create_envs(self):
         super()._create_envs()
@@ -100,8 +128,9 @@ class HumanoidChar(LeggedRobot):
         return imgs
     
     def step(self, actions):
-        actions = self.reindex(actions)
-        actions.to(self.device)
+        actions = self.reindex(actions).to(self.device)
+        actions = actions.clone()
+        self._apply_fixed_dof_constraints(actions=actions)
         action_tensor = actions.clone()
         self.action_history_buf = torch.cat([self.action_history_buf[:, 1:].clone(), action_tensor[:, None, :].clone()], dim=1)
         
@@ -131,6 +160,7 @@ class HumanoidChar(LeggedRobot):
         self.total_env_steps_counter += 1
         clip_actions = self.cfg.normalization.clip_actions / self.cfg.control.action_scale
         self.actions = torch.clip(action_tensor, -clip_actions, clip_actions).to(self.device)
+        self._apply_fixed_dof_constraints(actions=self.actions)
         self.render()
 
         for _ in range(self.cfg.control.decimation):
@@ -194,14 +224,22 @@ class HumanoidChar(LeggedRobot):
         pass
                                                                                                                                                                                                                                                                                                                                                                    
     def _reset_dofs(self, env_ids, dof_pos, dof_vel):
+        dof_pos = dof_pos.clone()
+        dof_vel = dof_vel.clone()
+        self._apply_fixed_dof_constraints(dof_pos=dof_pos, dof_vel=dof_vel)
         fixed_base = getattr(self.cfg.asset, "fix_base_link", False)
         if fixed_base:
             limit_margin = 1e-4
-            lower = self.dof_pos_limits[:, 0] + limit_margin
-            upper = self.dof_pos_limits[:, 1] - limit_margin
+            limit_tensor = self.dof_pos_limits
+            if getattr(self.cfg.asset, "reset_to_hard_dof_limits", False):
+                limit_tensor = self.dof_pos_limits_hard
+            lower = limit_tensor[:, 0] + limit_margin
+            upper = limit_tensor[:, 1] - limit_margin
             self.dof_pos[env_ids] = torch.max(torch.min(dof_pos[env_ids], upper), lower)
         else:
-            self.dof_pos[env_ids] = dof_pos[env_ids] * torch_rand_float(0.8, 1.2, (len(env_ids), self.num_dof), device=self.device)
+            randomized_dof_pos = dof_pos[env_ids] * torch_rand_float(0.8, 1.2, (len(env_ids), self.num_dof), device=self.device)
+            self._apply_fixed_dof_constraints(dof_pos=randomized_dof_pos)
+            self.dof_pos[env_ids] = randomized_dof_pos
         self.dof_vel[env_ids] = dof_vel[env_ids]
 
         env_ids_int32 = env_ids.to(dtype=torch.int32)

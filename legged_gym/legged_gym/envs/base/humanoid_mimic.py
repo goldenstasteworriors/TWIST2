@@ -122,6 +122,14 @@ class HumanoidMimic(HumanoidChar):
             self._dof_err_w = torch.ones(self.num_dof, device=self.device, dtype=torch.float)
         else:
             self._dof_err_w = torch.tensor(self._dof_err_w, device=self.device, dtype=torch.float)
+
+        self._dof_pos_limit_mask = torch.ones(self.num_dof, device=self.device, dtype=torch.float)
+        ignore_dof_pos_limit_indices = getattr(self.cfg.rewards, "ignore_dof_pos_limit_indices", [])
+        if len(ignore_dof_pos_limit_indices) > 0:
+            ignore_dof_pos_limit_indices = torch.tensor(
+                ignore_dof_pos_limit_indices, device=self.device, dtype=torch.long
+            )
+            self._dof_pos_limit_mask[ignore_dof_pos_limit_indices] = 0.0
         
         motion_body_names = getattr(self._motion_lib, "_body_link_list", [])
         motion_key_bodies = getattr(self.cfg.motion, "motion_key_bodies", self.cfg.motion.key_bodies)
@@ -639,6 +647,7 @@ class HumanoidMimic(HumanoidChar):
         - Joint Positions: ±0.05-0.1 rad noise range
         """
         if not self.cfg.motion.motion_dr_enabled:
+            self._apply_fixed_dof_constraints(dof_pos=dof_pos, dof_vel=dof_vel)
             return root_pos, root_rot, root_vel, root_ang_vel, dof_pos, dof_vel
         
         # Get noise ranges from config
@@ -701,6 +710,7 @@ class HumanoidMimic(HumanoidChar):
             root_ang_vel_noisy = root_ang_vel + (torch.rand(batch_size, 3, device=self.device) * 2 - 1) * vel_noise_range[0]
             dof_pos_noisy = dof_pos + (torch.rand(batch_size, dof_pos.shape[1], device=self.device) * 2 - 1) * joint_noise_range[0]
         
+        self._apply_fixed_dof_constraints(dof_pos=dof_pos_noisy, dof_vel=dof_vel)
         return root_pos_noisy, root_rot_noisy, root_vel_noisy, root_ang_vel_noisy, dof_pos_noisy, dof_vel
         
     def compute_observations(self):
@@ -960,7 +970,7 @@ class HumanoidMimic(HumanoidChar):
     def _reward_dof_pos_limits(self):
         out_of_limits = -(self.dof_pos - self.dof_pos_limits[:, 0]).clip(max=0.)
         out_of_limits += (self.dof_pos - self.dof_pos_limits[:, 1]).clip(min=0.)
-        return torch.sum(out_of_limits, dim=1)
+        return torch.sum(out_of_limits * self._dof_pos_limit_mask, dim=1)
     
     def _reward_dof_torque_limits(self):
         out_of_limits = torch.sum((torch.abs(self.torques) / self.torque_limits - self.cfg.rewards.soft_torque_limit).clip(min=0), dim=1)

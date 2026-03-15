@@ -417,11 +417,14 @@ class LeggedRobot(BaseTask):
         """
         if env_id==0:
             self.dof_pos_limits = torch.zeros(self.num_dof, 2, dtype=torch.float, device=self.device, requires_grad=False)
+            self.dof_pos_limits_hard = torch.zeros(self.num_dof, 2, dtype=torch.float, device=self.device, requires_grad=False)
             self.dof_vel_limits = torch.zeros(self.num_dof, dtype=torch.float, device=self.device, requires_grad=False)
             self.torque_limits = torch.zeros(self.num_dof, dtype=torch.float, device=self.device, requires_grad=False)
             for i in range(len(props)):
-                self.dof_pos_limits[i, 0] = props["lower"][i].item()
-                self.dof_pos_limits[i, 1] = props["upper"][i].item()
+                self.dof_pos_limits_hard[i, 0] = props["lower"][i].item()
+                self.dof_pos_limits_hard[i, 1] = props["upper"][i].item()
+                self.dof_pos_limits[i, 0] = self.dof_pos_limits_hard[i, 0]
+                self.dof_pos_limits[i, 1] = self.dof_pos_limits_hard[i, 1]
                 self.dof_vel_limits[i] = props["velocity"][i].item()
                 self.torque_limits[i] = props["effort"][i].item() * self.cfg.rewards.torque_safety_limit
                 # soft limits

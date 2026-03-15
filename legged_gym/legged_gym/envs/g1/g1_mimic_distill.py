@@ -41,6 +41,7 @@ class G1MimicDistill(HumanoidMimic):
         root_pos, root_rot, root_vel, root_ang_vel, dof_pos, dof_vel, body_pos, root_pos_delta_local, root_rot_delta_local = self._motion_lib.calc_motion_frame(motion_ids, motion_times)
         dof_pos = self._map_motion_dof(dof_pos)
         dof_vel = self._map_motion_dof(dof_vel)
+        self._apply_fixed_dof_constraints(dof_pos=dof_pos, dof_vel=dof_vel)
         root_pos[:, 2] += self.cfg.motion.height_offset
         self._ref_root_pos[env_ids] = root_pos
         self._ref_root_rot[env_ids] = root_rot
@@ -59,6 +60,7 @@ class G1MimicDistill(HumanoidMimic):
         root_pos, root_rot, root_vel, root_ang_vel, dof_pos, dof_vel, body_pos, root_pos_delta_local, root_rot_delta_local = self._motion_lib.calc_motion_frame(motion_ids, motion_times)
         dof_pos = self._map_motion_dof(dof_pos)
         dof_vel = self._map_motion_dof(dof_vel)
+        self._apply_fixed_dof_constraints(dof_pos=dof_pos, dof_vel=dof_vel)
         root_pos[:, 2] += self.cfg.motion.height_offset
         root_pos[:, :2] += self.episode_init_origin[:, :2]
         
@@ -134,6 +136,7 @@ class G1MimicDistill(HumanoidMimic):
         root_pos, root_rot, root_vel, root_ang_vel, dof_pos, dof_vel, body_pos, root_pos_delta_local, root_rot_delta_local = self._motion_lib.calc_motion_frame(motion_ids_tiled, obs_motion_times)
         dof_pos = self._map_motion_dof(dof_pos)
         dof_vel = self._map_motion_dof(dof_vel)
+        self._apply_fixed_dof_constraints(dof_pos=dof_pos, dof_vel=dof_vel)
         
         roll, pitch, yaw = euler_from_quaternion(root_rot)
         roll = roll.reshape(self.num_envs, num_steps, 1)

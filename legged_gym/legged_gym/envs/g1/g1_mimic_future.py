@@ -114,6 +114,7 @@ class G1MimicFuture(G1MimicDistill):
             self._motion_lib.calc_motion_frame(motion_ids_tiled, obs_motion_times)
         dof_pos = self._map_motion_dof(dof_pos)
         dof_vel = self._map_motion_dof(dof_vel)
+        self._apply_fixed_dof_constraints(dof_pos=dof_pos, dof_vel=dof_vel)
         
         # Apply motion domain randomization noise (unified for all frames)
         root_pos, root_rot, root_vel, root_ang_vel, dof_pos, dof_vel = self._apply_motion_domain_randomization(

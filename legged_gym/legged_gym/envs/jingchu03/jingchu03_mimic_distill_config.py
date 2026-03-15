@@ -28,7 +28,7 @@ class Jingchu03MimicPrivCfg(G1MimicPrivCfg):
         num_observations = n_priv_obs_single
         num_privileged_obs = n_priv_obs_single
 
-        dof_err_w = [1.0] * num_actions
+        dof_err_w = [0.0] + [1.0] * (num_actions - 1)
 
     class init_state(G1MimicPrivCfg.init_state):
         pos = [0.0, 0.0, 0.8]
@@ -84,6 +84,8 @@ class Jingchu03MimicPrivCfg(G1MimicPrivCfg):
         disable_dof_vel_indices = []
         ankle_dof_indices = []
         waist_dof_indices = [0, 1]
+        fixed_dof_indices = [0]
+        reset_to_hard_dof_limits = True
 
         penalize_contacts_on = []
         terminate_after_contacts_on = []
@@ -93,11 +95,14 @@ class Jingchu03MimicPrivCfg(G1MimicPrivCfg):
         fix_base_link = True
 
     class rewards(G1MimicPrivCfg.rewards):
+        ignore_dof_pos_limit_indices = [0, 1]
+
         class scales(G1MimicPrivCfg.rewards.scales):
             tracking_root_translation_z = 0.0
             tracking_root_rotation = 0.0
             tracking_root_linear_vel = 0.0
             tracking_root_angular_vel = 0.0
+            tracking_keybody_pos_global = 0.0
             feet_slip = 0.0
             feet_contact_forces = 0.0
             feet_stumble = 0.0
