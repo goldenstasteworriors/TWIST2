@@ -57,7 +57,7 @@ class HumanoidMimic(HumanoidChar):
         
         self.episode_means = {
             name: torch.zeros(cfg.env.num_envs, dtype=torch.float, device=sim_device, requires_grad=False)
-            for name in self.evaluations.keys()}
+            for name in self.eval_names}
             
         super().__init__(cfg, sim_params, physics_engine, sim_device, headless)
         self.last_feet_z = 0.05
@@ -315,13 +315,20 @@ class HumanoidMimic(HumanoidChar):
         
         # fill extras
         self.extras["episode"] = {}
+        log_eps = 1e-12
         for key in self.episode_sums.keys():
-            self.extras["episode"]['metric_' + key] = torch.mean(self.episode_sums[key][env_ids] / self._motion_lib.get_motion_length(self._motion_ids[env_ids]))
-            self.extras["episode"]['rew_' + key] = torch.mean(self.episode_sums[key][env_ids] * self.reward_scales[key] / self._motion_lib.get_motion_length(self._motion_ids[env_ids]))
+            metric_val = torch.mean(self.episode_sums[key][env_ids] / self._motion_lib.get_motion_length(self._motion_ids[env_ids]))
+            rew_val = torch.mean(self.episode_sums[key][env_ids] * self.reward_scales[key] / self._motion_lib.get_motion_length(self._motion_ids[env_ids]))
+            if torch.abs(metric_val).item() > log_eps:
+                self.extras["episode"]['metric_' + key] = metric_val
+            if torch.abs(rew_val).item() > log_eps:
+                self.extras["episode"]['rew_' + key] = rew_val
             self.episode_sums[key][env_ids] = 0.
         
         for key in self.episode_means.keys():
-            self.extras["episode"]['error_' + key] = torch.mean(self.episode_means[key][env_ids])
+            error_val = torch.mean(self.episode_means[key][env_ids])
+            if torch.abs(error_val).item() > log_eps:
+                self.extras["episode"]['error_' + key] = error_val
             self.episode_means[key][env_ids] = 0.
             
         if self.cfg.motion.motion_curriculum:
