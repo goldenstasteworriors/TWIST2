@@ -81,7 +81,8 @@ class HumanoidChar(LeggedRobot):
         self.fixed_dof_indices = torch.tensor(fixed_dof_indices, dtype=torch.long, device=self.device)
         fixed_dof_pos_targets = getattr(self.cfg.asset, "fixed_dof_pos_targets", None)
         if fixed_dof_pos_targets is None:
-            self.fixed_dof_pos_targets = self.default_dof_pos_all[self.fixed_dof_indices].clone()
+            # default_dof_pos_all is [num_envs, num_dof]; fixed targets should be selected on the dof axis.
+            self.fixed_dof_pos_targets = self.default_dof_pos[0, self.fixed_dof_indices].clone()
         else:
             if len(fixed_dof_pos_targets) != len(fixed_dof_indices):
                 raise ValueError("fixed_dof_pos_targets length must match fixed_dof_indices length")
