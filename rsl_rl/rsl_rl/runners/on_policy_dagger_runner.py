@@ -325,15 +325,23 @@ class OnPolicyDaggerRunner:
         ep_string = f''
         wandb_dict = {}
         if locs['ep_infos']:
-            for key in locs['ep_infos'][0]:
+            ep_info_keys = sorted({key for ep_info in locs['ep_infos'] for key in ep_info})
+            for key in ep_info_keys:
                 infotensor = torch.tensor([], device=self.device)
                 for ep_info in locs['ep_infos']:
+                    if key not in ep_info:
+                        continue
                     # handle scalar and zero dimensional tensor infos
-                    if not isinstance(ep_info[key], torch.Tensor):
-                        ep_info[key] = torch.Tensor([ep_info[key]])
-                    if len(ep_info[key].shape) == 0:
-                        ep_info[key] = ep_info[key].unsqueeze(0)
-                    infotensor = torch.cat((infotensor, ep_info[key].to(self.device)))
+                    ep_value = ep_info[key]
+                    if not isinstance(ep_value, torch.Tensor):
+                        ep_value = torch.tensor([ep_value], device=self.device)
+                    else:
+                        ep_value = ep_value.to(self.device)
+                    if len(ep_value.shape) == 0:
+                        ep_value = ep_value.unsqueeze(0)
+                    infotensor = torch.cat((infotensor, ep_value))
+                if infotensor.numel() == 0:
+                    continue
                 value = torch.mean(infotensor)
                 # wandb_dict['Episode_rew/' + key] = value
                 if "metric" in key:
