@@ -23,6 +23,9 @@ class G1MimicFuture(G1MimicDistill):
     def __init__(self, cfg: G1MimicStuFutureCfg, sim_params, physics_engine, sim_device, headless):
         # Store future motion configuration
         self.future_cfg = cfg.env
+        self.enable_vr_input_dr = getattr(cfg.env, 'enable_vr_input_dr', False)
+        self.vr_input_dr_train_only = getattr(cfg.env, 'vr_input_dr_train_only', True)
+        self._vr_input_dr_buffers_ready = False
 
 
         # Evaluation mode parameters
@@ -85,6 +88,132 @@ class G1MimicFuture(G1MimicDistill):
             self._init_force_curriculum_components(cfg)
             force_links = getattr(cfg.env.force_curriculum, 'force_apply_links', ['left_rubber_hand', 'right_rubber_hand'])
             print(f"Force curriculum enabled with force application to {len(force_links)} links: {force_links}")
+
+        if self.enable_vr_input_dr and self.obs_type == 'student_future':
+            self._init_vr_input_dr_buffers(cfg)
+            print(
+                "VR input DR enabled "
+                f"(hold_prob={self.future_cfg.vr_input_hold_prob}, "
+                f"max_hold={self.future_cfg.vr_input_max_hold_steps}, "
+                f"interp_prob={self.future_cfg.vr_input_interp_prob})"
+            )
+
+    def _init_vr_input_dr_buffers(self, cfg):
+        self._vr_input_single_obs_dim = getattr(cfg.env, 'n_mimic_obs_single', 0)
+        self._vr_input_total_dim = getattr(cfg.env, 'n_mimic_obs', 0) + getattr(cfg.env, 'n_future_obs', 0)
+
+        if self._vr_input_single_obs_dim <= 0 or self._vr_input_total_dim <= 0:
+            self.enable_vr_input_dr = False
+            return
+
+        self._vr_input_last_obs = torch.zeros((self.num_envs, self._vr_input_total_dim), device=self.device)
+        self._vr_input_hold_remaining = torch.zeros((self.num_envs,), device=self.device, dtype=torch.long)
+        self._vr_input_dr_buffers_ready = True
+
+    def _get_vr_input_dr_scale(self):
+        ramp_steps = max(int(getattr(self.future_cfg, 'vr_input_dr_increasing_steps', 1)), 1)
+        return min(float(self.total_env_steps_counter) / (ramp_steps * 24), 1.0)
+
+    def _apply_vr_input_feature_noise(self, ref_obs, env_ids, noise_scale):
+        if env_ids.numel() == 0 or noise_scale <= 0.:
+            return ref_obs
+
+        noise_prob = getattr(self.future_cfg, 'vr_input_noise_prob', 0.0)
+        if noise_prob <= 0.0:
+            return ref_obs
+
+        step_obs = ref_obs[env_ids].view(env_ids.numel(), -1, self._vr_input_single_obs_dim)
+        noise_mask = (torch.rand(env_ids.numel(), step_obs.shape[1], 1, device=self.device) < noise_prob).float()
+
+        def add_uniform_noise(start, end, magnitude):
+            if magnitude <= 0.0 or end <= start:
+                return
+            noise = (2 * torch.rand(env_ids.numel(), step_obs.shape[1], end - start, device=self.device) - 1) * (magnitude * noise_scale)
+            step_obs[..., start:end] += noise_mask * noise
+
+        add_uniform_noise(0, 2, getattr(self.future_cfg, 'vr_input_root_velocity_noise', 0.0))
+        add_uniform_noise(2, 3, getattr(self.future_cfg, 'vr_input_root_height_noise', 0.0))
+        add_uniform_noise(3, 5, getattr(self.future_cfg, 'vr_input_root_orientation_noise', 0.0))
+        add_uniform_noise(5, 6, getattr(self.future_cfg, 'vr_input_yaw_velocity_noise', 0.0))
+        add_uniform_noise(6, self._vr_input_single_obs_dim, getattr(self.future_cfg, 'vr_input_joint_position_noise', 0.0))
+
+        ref_obs[env_ids] = step_obs.view(env_ids.numel(), -1)
+        return ref_obs
+
+    def _apply_vr_input_randomization(self, mimic_obs, future_obs):
+        if not self.enable_vr_input_dr or not self._vr_input_dr_buffers_ready:
+            return mimic_obs, future_obs
+
+        if self.vr_input_dr_train_only and not self.headless:
+            return mimic_obs, future_obs
+
+        future_obs_flat = future_obs.view(self.num_envs, -1)
+        clean_ref_obs = torch.cat((mimic_obs, future_obs_flat), dim=-1)
+
+        if clean_ref_obs.shape[-1] != self._vr_input_total_dim:
+            self._vr_input_total_dim = clean_ref_obs.shape[-1]
+            self._vr_input_last_obs = torch.zeros((self.num_envs, self._vr_input_total_dim), device=self.device)
+            self._vr_input_hold_remaining = torch.zeros((self.num_envs,), device=self.device, dtype=torch.long)
+
+        delivered_ref_obs = clean_ref_obs.clone()
+        reset_mask = self.episode_length_buf <= 1
+
+        if reset_mask.any():
+            self._vr_input_last_obs[reset_mask] = clean_ref_obs[reset_mask]
+            self._vr_input_hold_remaining[reset_mask] = 0
+
+        continue_mask = ~reset_mask
+        if not continue_mask.any():
+            return mimic_obs, future_obs
+
+        dr_scale = self._get_vr_input_dr_scale()
+        if dr_scale <= 0.0:
+            self._vr_input_last_obs[continue_mask] = clean_ref_obs[continue_mask]
+            self._vr_input_hold_remaining[continue_mask] = 0
+            return mimic_obs, future_obs
+
+        hold_prob = min(getattr(self.future_cfg, 'vr_input_hold_prob', 0.0) * dr_scale, 1.0)
+        interp_prob = min(getattr(self.future_cfg, 'vr_input_interp_prob', 0.0) * dr_scale, 1.0)
+        interp_alpha_min, interp_alpha_max = getattr(self.future_cfg, 'vr_input_interp_alpha', [1.0, 1.0])
+        max_hold_steps = max(int(getattr(self.future_cfg, 'vr_input_max_hold_steps', 1)), 1)
+
+        active_hold_mask = continue_mask & (self._vr_input_hold_remaining > 0)
+        if active_hold_mask.any():
+            delivered_ref_obs[active_hold_mask] = self._vr_input_last_obs[active_hold_mask]
+            self._vr_input_hold_remaining[active_hold_mask] -= 1
+
+        available_mask = continue_mask & (~active_hold_mask)
+        if available_mask.any() and hold_prob > 0.0:
+            start_hold_mask = available_mask & (torch.rand(self.num_envs, device=self.device) < hold_prob)
+        else:
+            start_hold_mask = torch.zeros_like(continue_mask)
+
+        if start_hold_mask.any():
+            delivered_ref_obs[start_hold_mask] = self._vr_input_last_obs[start_hold_mask]
+            sampled_hold = torch.randint(1, max_hold_steps + 1, (int(start_hold_mask.sum().item()),), device=self.device)
+            self._vr_input_hold_remaining[start_hold_mask] = sampled_hold - 1
+
+        update_mask = available_mask & (~start_hold_mask)
+        if update_mask.any():
+            update_ids = update_mask.nonzero(as_tuple=False).squeeze(-1)
+            updated_ref_obs = clean_ref_obs[update_ids]
+
+            if interp_prob > 0.0:
+                interp_mask = torch.rand(update_ids.numel(), device=self.device) < interp_prob
+                if interp_mask.any():
+                    interp_ids = update_ids[interp_mask]
+                    alpha = torch.rand(interp_ids.numel(), 1, device=self.device)
+                    alpha = alpha * (interp_alpha_max - interp_alpha_min) + interp_alpha_min
+                    updated_ref_obs[interp_mask] = torch.lerp(self._vr_input_last_obs[interp_ids], clean_ref_obs[interp_ids], alpha)
+
+            delivered_ref_obs[update_ids] = updated_ref_obs
+            delivered_ref_obs = self._apply_vr_input_feature_noise(delivered_ref_obs, update_ids, dr_scale)
+            self._vr_input_last_obs[update_ids] = delivered_ref_obs[update_ids]
+
+        mimic_dim = mimic_obs.shape[-1]
+        mimic_obs = delivered_ref_obs[:, :mimic_dim]
+        future_obs = delivered_ref_obs[:, mimic_dim:].view_as(future_obs)
+        return mimic_obs, future_obs
     
     def _get_unified_motion_data(self):
         """Get unified motion data for both privileged and future frames in a single sampling call.
@@ -262,6 +391,7 @@ class G1MimicFuture(G1MimicDistill):
         if self.obs_type == 'student_future':
             # Build future observations from the SAME motion_data (no additional sampling!)
             future_obs = self._build_future_obs_from_data(motion_data)
+            mimic_obs, future_obs = self._apply_vr_input_randomization(mimic_obs, future_obs)
             
             return priv_mimic_obs, mimic_obs, future_obs
         else:

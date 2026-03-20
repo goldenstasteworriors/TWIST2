@@ -22,6 +22,19 @@ class Jingchu03MimicStuFutureCfg(Jingchu03MimicPrivCfg):
         num_observations = n_obs_single * (Jingchu03MimicPrivCfg.env.history_len + 1) + n_future_obs
 
         enable_force_curriculum = False
+        enable_vr_input_dr = False
+        vr_input_dr_train_only = True
+        vr_input_dr_increasing_steps = 5000
+        vr_input_hold_prob = 0.35
+        vr_input_max_hold_steps = 3
+        vr_input_interp_prob = 0.5
+        vr_input_interp_alpha = [0.35, 0.9]
+        vr_input_noise_prob = 0.7
+        vr_input_root_velocity_noise = 0.08
+        vr_input_root_height_noise = 0.03
+        vr_input_root_orientation_noise = 0.12
+        vr_input_yaw_velocity_noise = 0.12
+        vr_input_joint_position_noise = 0.08
 
         class force_curriculum:
             force_apply_links = ['left_wrist_roll', 'right_wrist_roll']

@@ -38,6 +38,20 @@ class G1MimicStuFutureCfg(G1MimicPrivCfg):
         # FALCON-style curriculum force application (domain randomization)
         # enable_force_curriculum = True  # Enable force disturbances during training
         enable_force_curriculum = False  # Enable force disturbances during training
+
+        enable_vr_input_dr = False
+        vr_input_dr_train_only = True
+        vr_input_dr_increasing_steps = 5000
+        vr_input_hold_prob = 0.35
+        vr_input_max_hold_steps = 3
+        vr_input_interp_prob = 0.5
+        vr_input_interp_alpha = [0.35, 0.9]
+        vr_input_noise_prob = 0.7
+        vr_input_root_velocity_noise = 0.08
+        vr_input_root_height_noise = 0.03
+        vr_input_root_orientation_noise = 0.12
+        vr_input_yaw_velocity_noise = 0.12
+        vr_input_joint_position_noise = 0.08
         
         class force_curriculum:
             # Force application settings
