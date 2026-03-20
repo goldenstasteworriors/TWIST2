@@ -111,6 +111,8 @@ class G1MimicFuture(G1MimicDistill):
         self._vr_input_dr_buffers_ready = True
 
     def _get_vr_input_dr_scale(self):
+        if not getattr(self.future_cfg, 'vr_input_dr_use_curriculum', False):
+            return 1.0
         ramp_steps = max(int(getattr(self.future_cfg, 'vr_input_dr_increasing_steps', 1)), 1)
         return min(float(self.total_env_steps_counter) / (ramp_steps * 24), 1.0)
 

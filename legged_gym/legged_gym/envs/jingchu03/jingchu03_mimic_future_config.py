@@ -24,6 +24,7 @@ class Jingchu03MimicStuFutureCfg(Jingchu03MimicPrivCfg):
         enable_force_curriculum = False
         enable_vr_input_dr = False
         vr_input_dr_train_only = True
+        vr_input_dr_use_curriculum = False
         vr_input_dr_increasing_steps = 5000
         vr_input_hold_prob = 0.35
         vr_input_max_hold_steps = 3
